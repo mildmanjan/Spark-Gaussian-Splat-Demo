@@ -91,9 +91,10 @@
             <li>🔄 Splat orientation fixer</li>
             <li>📏 Splat size control</li>
             <li>🎮 Mouse/keyboard controls</li>
+            <li>🔗 Click blue cube for Spark docs</li>
         </ul>
         <p><strong>Controls:</strong> Mouse to orbit | W/S dolly forward/back | A/D truck left/right | Q/E lift up/down</p>
-      
+        <p><small>Smooth momentum-based camera movement for cinematic feel!</small></p>
     </div>
     
     <div id="controls">
@@ -243,6 +244,20 @@
                     cube.position.set(...positions[i]);
                     cube.castShadow = true;
                     cube.receiveShadow = true;
+                    
+                    // Make the blue cube (index 2) clickable and link to Spark docs
+                    if (i === 2) {
+                        cube.userData = { 
+                            clickable: true, 
+                            url: 'https://sparkjs.dev/',
+                            name: 'Spark Documentation'
+                        };
+                        // Add a slight glow effect to indicate it's clickable
+                        cube.material.emissive = new THREE.Color(0x001122);
+                        // Add hover cursor change
+                        cube.userData.isLinkCube = true;
+                    }
+                    
                     scene.add(cube);
                     meshes.push(cube);
                 }
@@ -393,6 +408,53 @@
                     camera.aspect = window.innerWidth / window.innerHeight;
                     camera.updateProjectionMatrix();
                     renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+                
+                // Mouse interaction for clickable objects
+                const raycaster = new THREE.Raycaster();
+                const mouse = new THREE.Vector2();
+                
+                // Mouse click detection
+                renderer.domElement.addEventListener('click', (event) => {
+                    // Calculate mouse position in normalized device coordinates (-1 to +1)
+                    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                    
+                    // Update the raycaster with camera and mouse position
+                    raycaster.setFromCamera(mouse, camera);
+                    
+                    // Calculate objects intersecting the raycaster
+                    const intersects = raycaster.intersectObjects(meshes);
+                    
+                    if (intersects.length > 0) {
+                        const clickedObject = intersects[0].object;
+                        
+                        // Check if the clicked object is clickable
+                        if (clickedObject.userData.clickable) {
+                            console.log(`🔗 Opening: ${clickedObject.userData.name}`);
+                            window.open(clickedObject.userData.url, '_blank');
+                        }
+                    }
+                });
+                
+                // Mouse hover detection for cursor changes
+                renderer.domElement.addEventListener('mousemove', (event) => {
+                    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                    
+                    raycaster.setFromCamera(mouse, camera);
+                    const intersects = raycaster.intersectObjects(meshes);
+                    
+                    // Change cursor to pointer when hovering over clickable objects
+                    let overClickable = false;
+                    if (intersects.length > 0) {
+                        const hoveredObject = intersects[0].object;
+                        if (hoveredObject.userData.clickable) {
+                            overClickable = true;
+                        }
+                    }
+                    
+                    renderer.domElement.style.cursor = overClickable ? 'pointer' : 'default';
                 });
                 
                 // Drag and drop for splat files
@@ -597,8 +659,8 @@
         // Initialize the demo
         const demo = new GaussianSplatDemo();
         
-        console.log("🚀 Spark Gaussian Splat Demo Ready");
-        console.log("📝 Try dragging and dropping a .ply or .splat file");
+        console.log("🚀 Spark Gaussian Splat Demo Ready!");
+        console.log("📝 Try dragging and dropping a .ply or .splat file!");
         
     </script>
 </body>

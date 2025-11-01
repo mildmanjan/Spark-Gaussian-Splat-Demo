@@ -91,7 +91,7 @@
             <li>🔄 Splat orientation fixer</li>
             <li>📏 Splat size control</li>
             <li>🎮 Mouse/keyboard controls</li>
-            <li>🔗 Click blue cube for Spark docs</li>
+            <li>🔗 Click glowing blue cube → Spark docs</li>
         </ul>
         <p><strong>Controls:</strong> Mouse to orbit | W/S dolly forward/back | A/D truck left/right | Q/E lift up/down</p>
         <p><small>Smooth momentum-based camera movement for cinematic feel!</small></p>
@@ -250,12 +250,33 @@
                         cube.userData = { 
                             clickable: true, 
                             url: 'https://sparkjs.dev/',
-                            name: 'Spark Documentation'
+                            name: 'Spark Documentation',
+                            isLinkCube: true
                         };
-                        // Add a slight glow effect to indicate it's clickable
-                        cube.material.emissive = new THREE.Color(0x001122);
-                        // Add hover cursor change
-                        cube.userData.isLinkCube = true;
+                        
+                        // Make it much more obviously clickable
+                        cube.material.emissive = new THREE.Color(0x0066ff); // Bright blue glow
+                        cube.scale.set(1.2, 1.2, 1.2); // Make it slightly larger
+                        
+                        // Add wireframe outline as indicator
+                        const outlineGeometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
+                        const outlineMaterial = new THREE.MeshBasicMaterial({
+                            color: 0x00ffff,
+                            wireframe: true,
+                            transparent: true,
+                            opacity: 0.5
+                        });
+                        const outline = new THREE.Mesh(outlineGeometry, outlineMaterial);
+                        outline.position.copy(cube.position);
+                        outline.userData.isOutline = true;
+                        scene.add(outline);
+                        
+                        // Store reference for animation
+                        cube.userData.outline = outline;
+                        cube.userData.originalY = cube.position.y;
+                        
+                        // Add to clickable objects array for special handling
+                        this.clickableCube = cube;
                     }
                     
                     scene.add(cube);
@@ -451,8 +472,20 @@
                         const hoveredObject = intersects[0].object;
                         if (hoveredObject.userData.clickable) {
                             overClickable = true;
+                            
+                            // Enhanced hover effect for clickable cube
+                            hoveredObject.scale.set(1.3, 1.3, 1.3);
+                            hoveredObject.material.emissive.setRGB(0.2, 0.4, 1.0); // Brighter blue
                         }
                     }
+                    
+                    // Reset hover effects for all clickable objects not being hovered
+                    meshes.forEach(mesh => {
+                        if (mesh.userData.clickable && (!intersects.length || intersects[0].object !== mesh)) {
+                            mesh.scale.set(1.2, 1.2, 1.2); // Back to normal enlarged size
+                            // Will be overridden by animation, but good to reset
+                        }
+                    });
                     
                     renderer.domElement.style.cursor = overClickable ? 'pointer' : 'default';
                 });
@@ -573,6 +606,31 @@
             animate() {
                 requestAnimationFrame(() => this.animate());
                 
+                // Animate the clickable cube to make it more obvious
+                if (this.clickableCube) {
+                    const time = Date.now() * 0.001;
+                    
+                    // Gentle rotation
+                    this.clickableCube.rotation.y += 0.02;
+                    this.clickableCube.rotation.x = Math.sin(time) * 0.1;
+                    
+                    // Gentle bobbing motion
+                    this.clickableCube.position.y = this.clickableCube.userData.originalY + Math.sin(time * 2) * 0.1;
+                    
+                    // Animate the outline
+                    if (this.clickableCube.userData.outline) {
+                        this.clickableCube.userData.outline.rotation.y -= 0.03; // Counter-rotate
+                        this.clickableCube.userData.outline.position.copy(this.clickableCube.position);
+                        
+                        // Pulsing opacity
+                        this.clickableCube.userData.outline.material.opacity = 0.3 + Math.sin(time * 3) * 0.2;
+                    }
+                    
+                    // Pulsing glow effect (keep it blue)
+                    const glowIntensity = 0.3 + Math.sin(time * 4) * 0.2;
+                    this.clickableCube.material.emissive.setRGB(0, glowIntensity * 0.4, glowIntensity);
+                }
+                
                 // Update controls
                 controls.update();
                 
@@ -580,6 +638,9 @@
                 renderer.render(scene, camera);
             }
         }
+        
+        // Initialize the demo
+        const demo = new GaussianSplatDemo();
         
         // Global functions for UI controls
         window.addProceduralSplats = function() {
@@ -655,9 +716,6 @@
         function showLoading(show) {
             loadingIndicator.style.display = show ? 'block' : 'none';
         }
-        
-        // Initialize the demo
-        const demo = new GaussianSplatDemo();
         
         console.log("🚀 Spark Gaussian Splat Demo Ready!");
         console.log("📝 Try dragging and dropping a .ply or .splat file!");

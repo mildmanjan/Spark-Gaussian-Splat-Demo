@@ -93,7 +93,7 @@
             <li>🎮 Mouse/keyboard controls</li>
         </ul>
         <p><strong>Controls:</strong> Mouse to orbit | W/S dolly forward/back | A/D truck left/right | Q/E lift up/down</p>
-        <p><small>Cinema-style camera controls for professional movement!</small></p>
+      
     </div>
     
     <div id="controls">
@@ -413,15 +413,18 @@
                     }
                 });
                 
-                // Keyboard controls for camera movement
+                // Keyboard controls for camera movement with momentum
                 const keys = {};
+                const velocity = new THREE.Vector3(0, 0, 0); // x=truck, y=lift, z=dolly
+                const acceleration = 0.008; // How fast we accelerate
+                const damping = 0.85; // How quickly we slow down (0.85 = retain 85% of velocity)
+                const maxSpeed = 0.15; // Maximum movement speed
+                
                 document.addEventListener('keydown', (e) => keys[e.code] = true);
                 document.addEventListener('keyup', (e) => keys[e.code] = false);
                 
-                // Update camera position based on keys
+                // Update camera position based on keys with momentum
                 const updateMovement = () => {
-                    const speed = 0.1;
-                    
                     // Get camera's current forward and right vectors projected onto horizontal plane
                     const forward = new THREE.Vector3();
                     const right = new THREE.Vector3();
@@ -435,42 +438,55 @@
                     right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
                     right.normalize();
                     
+                    // Apply acceleration based on key presses
+                    let inputX = 0, inputY = 0, inputZ = 0;
+                    
+                    // Dolly forward/backward (Z velocity)
+                    if (keys['KeyW']) inputZ += 1;
+                    if (keys['KeyS']) inputZ -= 1;
+                    
+                    // Truck left/right (X velocity) 
+                    if (keys['KeyA']) inputX -= 1;
+                    if (keys['KeyD']) inputX += 1;
+                    
+                    // Lift up/down (Y velocity)
+                    if (keys['KeyQ']) inputY -= 1;
+                    if (keys['KeyE']) inputY += 1;
+                    
+                    // Update velocities with acceleration and damping
+                    velocity.x += inputX * acceleration;
+                    velocity.y += inputY * acceleration;
+                    velocity.z += inputZ * acceleration;
+                    
+                    // Apply damping (momentum decay when no input)
+                    velocity.multiplyScalar(damping);
+                    
+                    // Clamp to maximum speed
+                    velocity.x = Math.max(-maxSpeed, Math.min(maxSpeed, velocity.x));
+                    velocity.y = Math.max(-maxSpeed, Math.min(maxSpeed, velocity.y));
+                    velocity.z = Math.max(-maxSpeed, Math.min(maxSpeed, velocity.z));
+                    
+                    // Apply movement if there's any velocity
+                    const threshold = 0.001; // Stop tiny movements
                     let moved = false;
                     
-                    // Dolly forward/backward in horizontal plane (W/S)
-                    // Move both camera and target to maintain look direction
-                    if (keys['KeyW']) {
-                        camera.position.addScaledVector(forward, speed);
-                        controls.target.addScaledVector(forward, speed);
-                        moved = true;
-                    }
-                    if (keys['KeyS']) {
-                        camera.position.addScaledVector(forward, -speed);
-                        controls.target.addScaledVector(forward, -speed);
+                    // Dolly forward/backward (move camera + target together)
+                    if (Math.abs(velocity.z) > threshold) {
+                        camera.position.addScaledVector(forward, velocity.z);
+                        controls.target.addScaledVector(forward, velocity.z);
                         moved = true;
                     }
                     
-                    // Truck left/right in horizontal plane (A/D) 
-                    // Move both camera and target to maintain look direction
-                    if (keys['KeyA']) {
-                        camera.position.addScaledVector(right, -speed);
-                        controls.target.addScaledVector(right, -speed);
-                        moved = true;
-                    }
-                    if (keys['KeyD']) {
-                        camera.position.addScaledVector(right, speed);
-                        controls.target.addScaledVector(right, speed);
+                    // Truck left/right (move camera + target together)
+                    if (Math.abs(velocity.x) > threshold) {
+                        camera.position.addScaledVector(right, velocity.x);
+                        controls.target.addScaledVector(right, velocity.x);
                         moved = true;
                     }
                     
-                    // Lift up/down on world Y-axis (Q/E)
-                    // Only move camera, not target, to change elevation angle
-                    if (keys['KeyQ']) {
-                        camera.position.y -= speed;
-                        moved = true;
-                    }
-                    if (keys['KeyE']) {
-                        camera.position.y += speed;
+                    // Lift up/down (only move camera for elevation change)
+                    if (Math.abs(velocity.y) > threshold) {
+                        camera.position.y += velocity.y;
                         moved = true;
                     }
                     
@@ -581,8 +597,8 @@
         // Initialize the demo
         const demo = new GaussianSplatDemo();
         
-        console.log("🚀 Spark Gaussian Splat Demo Ready!");
-        console.log("📝 Try dragging and dropping a .ply or .splat file!");
+        console.log("🚀 Spark Gaussian Splat Demo Ready");
+        console.log("📝 Try dragging and dropping a .ply or .splat file");
         
     </script>
 </body>

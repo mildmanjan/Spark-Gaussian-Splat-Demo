@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spark Gaussian Splat Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: Arial, sans-serif;
+        }
+        
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 5px;
+            max-width: 350px;
+            z-index: 100;
+        }
+        
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 5px;
+            z-index: 100;
+        }
+        
+        button {
+            margin: 5px;
+            padding: 8px 12px;
+            background: #333;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #555;
+        }
+        
+        #loadingIndicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 18px;
+            z-index: 200;
+        }
+        
+        input[type="file"] {
+            margin: 5px 0;
+        }
+        
+        input[type="range"] {
+            width: 100px;
+            margin: 5px;
+        }
+        
+        #scaleValue {
+            font-weight: bold;
+            color: #ffff99;
+        }
+        
+        label {
+            font-size: 12px;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h3>🔥 Spark Gaussian Splat Demo</h3>
+        <p><strong>Features:</strong></p>
+        <ul>
+            <li>✨ Procedural splat generation</li>
+            <li>🎯 Mixed scene (splats + meshes)</li>
+            <li>📂 Drag & drop .ply/.splat files</li>
+            <li>🔄 Splat orientation fixer</li>
+            <li>📏 Splat size control</li>
+            <li>🎮 Mouse/keyboard controls</li>
+        </ul>
+        <p><strong>Controls:</strong> Mouse to orbit | W/S forward/back | A/D left/right | Q/E up/down</p>
+        <p><small>Fixed: Upside-down splat imports</small></p>
+    </div>
+    
+    <div id="controls">
+        <h4>Demo Controls</h4>
+        <button onclick="addProceduralSplats()">Add Procedural Splats</button>
+        <button onclick="toggleMeshes()">Toggle Meshes</button>
+        <button onclick="addAxes()">Add Axes</button>
+        <button onclick="resetCamera()">Reset Camera</button>
+        <br>
+        <button onclick="invertSplats()">Flip Splats Y</button>
+        <button onclick="clearSplats()">Clear All Splats</button>
+        <br>
+        <label for="splatScale">Splat Size:</label>
+        <input type="range" id="splatScale" min="0.01" max="10.0" step="0.1" value="1.0" onchange="updateSplatScale(this.value)">
+        <span id="scaleValue">1.0x</span>
+        <br>
+        <label for="fileInput">Load Splat File:</label>
+        <input type="file" id="fileInput" accept=".ply,.splat,.ksplat,.spz" onchange="loadSplatFile(event)">
+    </div>
+    
+    <div id="loadingIndicator" style="display: none;">Loading...</div>
+
+    <!-- Import map for ES modules -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/",
+            "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/0.1.10/spark.module.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from "three";
+        import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+        import { SplatMesh, SparkRenderer, constructAxes } from "@sparkjsdev/spark";
+
+        // Global variables
+        let scene, camera, renderer, sparkRenderer, controls;
+        let meshes = [];
+        let loadedSplats = []; // Track loaded splat meshes
+        let proceduralSplats = []; // Track procedural splat meshes
+        let currentSplatScale = 1.0;
+        let loadingIndicator;
+        
+        class GaussianSplatDemo {
+            constructor() {
+                this.init();
+                this.setupEventListeners();
+                this.createInitialScene();
+                this.animate();
+            }
+            
+            init() {
+                // Loading indicator
+                loadingIndicator = document.getElementById('loadingIndicator');
+                
+                // Scene setup
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x222222);
+                
+                // Camera setup
+                camera = new THREE.PerspectiveCamera(
+                    60, 
+                    window.innerWidth / window.innerHeight, 
+                    0.1, 
+                    1000
+                );
+                camera.position.set(5, 5, 5);
+                camera.lookAt(0, 0, 0);
+                
+                // WebGL Renderer
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.shadowMap.enabled = true;
+                renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                document.body.appendChild(renderer.domElement);
+                
+                // Spark Renderer for Gaussian Splats
+                sparkRenderer = new SparkRenderer({ 
+                    renderer: renderer,
+                    autoUpdate: true
+                });
+                
+                // Add SparkRenderer to camera so it follows camera movements
+                camera.add(sparkRenderer);
+                scene.add(camera);
+                
+                // Controls
+                controls = new OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+                controls.screenSpacePanning = false;
+                controls.minDistance = 1;
+                controls.maxDistance = 100;
+                
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+                scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(10, 10, 5);
+                directionalLight.castShadow = true;
+                directionalLight.shadow.mapSize.width = 2048;
+                directionalLight.shadow.mapSize.height = 2048;
+                scene.add(directionalLight);
+                
+                console.log("✅ Spark demo initialized");
+            }
+            
+            createInitialScene() {
+                // Add a ground plane
+                const groundGeometry = new THREE.PlaneGeometry(20, 20);
+                const groundMaterial = new THREE.MeshLambertMaterial({ 
+                    color: 0x444444,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                ground.position.y = -1;
+                ground.receiveShadow = true;
+                scene.add(ground);
+                meshes.push(ground);
+                
+                // Add some example cubes
+                this.addExampleMeshes();
+                
+                // Add procedural splats by default
+                this.addProceduralSplats();
+            }
+            
+            addExampleMeshes() {
+                // Add a few colorful cubes as reference objects
+                const colors = [0xff4444, 0x44ff44, 0x4444ff];
+                const positions = [
+                    [-3, 0, 0],
+                    [0, 0, -3], 
+                    [3, 0, 0]
+                ];
+                
+                for (let i = 0; i < 3; i++) {
+                    const geometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+                    const material = new THREE.MeshPhongMaterial({ color: colors[i] });
+                    const cube = new THREE.Mesh(geometry, material);
+                    cube.position.set(...positions[i]);
+                    cube.castShadow = true;
+                    cube.receiveShadow = true;
+                    scene.add(cube);
+                    meshes.push(cube);
+                }
+            }
+            
+            addProceduralSplats() {
+                try {
+                    // Create a spiral of splats
+                    const spiralSplats = new SplatMesh({
+                        constructSplats: (splats) => {
+                            const numSplats = 500;
+                            for (let i = 0; i < numSplats; i++) {
+                                const t = i / numSplats;
+                                const angle = t * Math.PI * 8; // 4 full rotations
+                                const radius = t * 3;
+                                const height = t * 4 - 2;
+                                
+                                // Position
+                                const x = Math.cos(angle) * radius;
+                                const z = Math.sin(angle) * radius;
+                                const y = height;
+                                
+                                // Color based on height
+                                const hue = (height + 2) / 4; // 0-1 range
+                                const color = new THREE.Color().setHSL(hue, 0.8, 0.6);
+                                
+                                splats.addSplat({
+                                    center: [x, y, z],
+                                    scale: [0.1, 0.1, 0.1],
+                                    color: [color.r, color.g, color.b],
+                                    opacity: 0.8,
+                                    quaternion: [0, 0, 0, 1]
+                                });
+                            }
+                        }
+                    });
+                    
+                    scene.add(spiralSplats);
+                    proceduralSplats.push(spiralSplats);
+                    // Apply current scale
+                    spiralSplats.scale.setScalar(currentSplatScale);
+                    console.log("✨ Added procedural spiral splats");
+                    
+                    // Create a sphere of random splats
+                    const sphereSplats = new SplatMesh({
+                        constructSplats: (splats) => {
+                            const numSplats = 300;
+                            for (let i = 0; i < numSplats; i++) {
+                                // Random point on sphere
+                                const theta = Math.random() * Math.PI * 2;
+                                const phi = Math.acos(2 * Math.random() - 1);
+                                const radius = 1.5 + Math.random() * 0.5;
+                                
+                                const x = radius * Math.sin(phi) * Math.cos(theta);
+                                const y = radius * Math.cos(phi) + 2;
+                                const z = radius * Math.sin(phi) * Math.sin(theta);
+                                
+                                // Random bright colors
+                                const color = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
+                                
+                                splats.addSplat({
+                                    center: [x, y, z],
+                                    scale: [0.05, 0.05, 0.05],
+                                    color: [color.r, color.g, color.b],
+                                    opacity: 0.9,
+                                    quaternion: [0, 0, 0, 1]
+                                });
+                            }
+                        }
+                    });
+                    
+                    scene.add(sphereSplats);
+                    proceduralSplats.push(sphereSplats);
+                    // Apply current scale
+                    sphereSplats.scale.setScalar(currentSplatScale);
+                    console.log("🌟 Added procedural sphere splats");
+                    
+                } catch (error) {
+                    console.error("Error creating procedural splats:", error);
+                }
+            }
+            
+            addAxesSplats() {
+                try {
+                    const axes = new SplatMesh({
+                        constructSplats: (splats) => constructAxes({ splats })
+                    });
+                    axes.position.set(0, 0, -1);
+                    axes.scale.setScalar(currentSplatScale);
+                    scene.add(axes);
+                    proceduralSplats.push(axes);
+                    console.log("📐 Added axes splats");
+                } catch (error) {
+                    console.error("Error creating axes:", error);
+                }
+            }
+            
+            async loadSplatFromFile(file) {
+                showLoading(true);
+                try {
+                    // Create a blob URL for the file
+                    const url = URL.createObjectURL(file);
+                    
+                    // Determine file type from extension
+                    const fileName = file.name.toLowerCase();
+                    let fileType;
+                    if (fileName.endsWith('.splat')) {
+                        fileType = 'SPLAT';
+                    } else if (fileName.endsWith('.ksplat')) {
+                        fileType = 'KSPLAT';
+                    }
+                    
+                    // Create SplatMesh
+                    const splatMesh = new SplatMesh({
+                        url: url,
+                        fileType: fileType,
+                        onLoad: () => {
+                            console.log(`✅ Loaded splat file: ${file.name}`);
+                            showLoading(false);
+                            // Clean up blob URL
+                            URL.revokeObjectURL(url);
+                        }
+                    });
+                    
+                    // Fix common coordinate system issues
+                    // Many splat files are created with Y-up but may appear inverted
+                    splatMesh.rotation.x = Math.PI; // Flip 180 degrees around X-axis
+                    
+                    // Position the loaded splat
+                    splatMesh.position.set(0, 1, 0);
+                    
+                    // Apply current scale
+                    splatMesh.scale.setScalar(currentSplatScale);
+                    
+                    scene.add(splatMesh);
+                    loadedSplats.push(splatMesh);
+                    
+                } catch (error) {
+                    console.error("Error loading splat file:", error);
+                    showLoading(false);
+                    alert("Error loading splat file: " + error.message);
+                }
+            }
+            
+            setupEventListeners() {
+                // Window resize
+                window.addEventListener('resize', () => {
+                    camera.aspect = window.innerWidth / window.innerHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+                
+                // Drag and drop for splat files
+                document.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                });
+                
+                document.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        const file = files[0];
+                        if (this.isSplatFile(file)) {
+                            this.loadSplatFromFile(file);
+                        } else {
+                            alert("Please drop a .ply, .splat, .ksplat, or .spz file");
+                        }
+                    }
+                });
+                
+                // Keyboard controls for camera movement
+                const keys = {};
+                document.addEventListener('keydown', (e) => keys[e.code] = true);
+                document.addEventListener('keyup', (e) => keys[e.code] = false);
+                
+                // Update camera position based on keys
+                const updateMovement = () => {
+                    const speed = 0.1;
+                    // Forward/backward movement
+                    if (keys['KeyW']) camera.translateZ(-speed);  // Forward
+                    if (keys['KeyS']) camera.translateZ(speed);   // Backward
+                    
+                    // Left/right movement (A/D)
+                    if (keys['KeyA']) camera.translateX(-speed);  // Left
+                    if (keys['KeyD']) camera.translateX(speed);   // Right
+                    
+                    // Up/down movement on Y-axis (Q/E)
+                    if (keys['KeyQ']) camera.translateY(-speed);  // Down
+                    if (keys['KeyE']) camera.translateY(speed);   // Up
+                    
+                    requestAnimationFrame(updateMovement);
+                };
+                updateMovement();
+            }
+            
+            isSplatFile(file) {
+                const name = file.name.toLowerCase();
+                return name.endsWith('.ply') || 
+                       name.endsWith('.splat') || 
+                       name.endsWith('.ksplat') || 
+                       name.endsWith('.spz');
+            }
+            
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                
+                // Update controls
+                controls.update();
+                
+                // Render the scene with Spark integration
+                renderer.render(scene, camera);
+            }
+        }
+        
+        // Global functions for UI controls
+        window.addProceduralSplats = function() {
+            demo.addProceduralSplats();
+        };
+        
+        window.toggleMeshes = function() {
+            meshes.forEach(mesh => {
+                mesh.visible = !mesh.visible;
+            });
+        };
+        
+        window.addAxes = function() {
+            demo.addAxesSplats();
+        };
+        
+        window.resetCamera = function() {
+            camera.position.set(5, 5, 5);
+            camera.lookAt(0, 0, 0);
+            controls.reset();
+        };
+        
+        window.invertSplats = function() {
+            // Flip all loaded splats around X-axis
+            loadedSplats.forEach(splat => {
+                splat.rotation.x += Math.PI;
+            });
+            console.log("🔄 Flipped all loaded splats");
+        };
+        
+        window.clearSplats = function() {
+            // Remove all loaded splats from scene
+            loadedSplats.forEach(splat => {
+                scene.remove(splat);
+            });
+            loadedSplats.length = 0;
+            
+            // Remove all procedural splats from scene
+            proceduralSplats.forEach(splat => {
+                scene.remove(splat);
+            });
+            proceduralSplats.length = 0;
+            
+            console.log("🗑️ Cleared all splats");
+        };
+        
+        window.updateSplatScale = function(value) {
+            currentSplatScale = parseFloat(value);
+            document.getElementById('scaleValue').textContent = value + 'x';
+            
+            // Apply scale to all loaded splats
+            loadedSplats.forEach(splat => {
+                splat.scale.setScalar(currentSplatScale);
+            });
+            
+            // Apply scale to all procedural splats
+            proceduralSplats.forEach(splat => {
+                splat.scale.setScalar(currentSplatScale);
+            });
+            
+            console.log(`📏 Updated splat scale to ${value}x`);
+        };
+        
+        window.loadSplatFile = function(event) {
+            const file = event.target.files[0];
+            if (file && demo.isSplatFile(file)) {
+                demo.loadSplatFromFile(file);
+            } else {
+                alert("Please select a .ply, .splat, .ksplat, or .spz file");
+            }
+        };
+        
+        function showLoading(show) {
+            loadingIndicator.style.display = show ? 'block' : 'none';
+        }
+        
+        // Initialize the demo
+        const demo = new GaussianSplatDemo();
+        
+        console.log("🚀 Spark Gaussian Splat Demo Ready!");
+        console.log("📝 Try dragging and dropping a .ply or .splat file!");
+        
+    </script>
+</body>
+</html>

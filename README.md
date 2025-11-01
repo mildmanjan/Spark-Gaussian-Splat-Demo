@@ -133,4 +133,3 @@ Use the size slider (0.1x to 3.0x) to adjust the scale of all splats in real-tim
 - Close other browser tabs to free up GPU memory
 - Check browser console for WebGL errors
 
-Enjoy exploring the world of Gaussian Splatting with Spark!
